@@ -1462,7 +1462,8 @@ if (isCli())
 		'cmd:',
 		'one-pass',
 		'quarantine',
-		'with-2check'
+		'with-2check',
+		'multi-thread:'
 	);
 	$cli_longopts = array_merge($cli_longopts, array_values($cli_options));
 
@@ -3293,6 +3294,37 @@ QCR_Debug();
 	    stdOut('Skip extensions: ' . implode(',', $g_IgnoredExt));
          } 
 
+if (isset($options['multi-thread']) AND !empty($options['multi-thread'])){
+	$t = explode(',', $options['multi-thread']);
+	if ($t[0]=='file') {
+		$offset = !empty($t[1]) ? intval($t[1]) : 0;
+		$limit  = !empty($t[2]) ? intval($t[2]) : -1;
+		$s_file = !empty($t[3]) ? $t[3] : QUEUE_FILENAME;
+		stdOut("Reading with $offset" . (($limit>0) ? " to " . ($offset+$limit) : '' ). " line from file $s_file");
+		stdOut("Log file saves in ". realpath(ROOT_PATH));
+		stdOut(str_repeat(' ', 160),false);
+		QCR_GoScan2($offset, $limit, $s_file);
+		stdOut("Found $g_TotalFiles files.");
+		saveResults("AI-LOG-$offset-$limit.tmp");
+		exit(0);
+	}
+	if ($t[0]=='report') {
+		stdOut("Search log files in " . ROOT_PATH);
+		$list = glob('AI-LOG-*tmp');
+		empty($list) && die('Not found AI-LOG-*tmp');
+		foreach ($list as $l_FN) {
+			stdOut('Loading ' . $l_FN);
+			loadResults($l_FN);
+		}
+		foreach ($list as $line) {
+			unlink($l_FN);
+		}
+	}
+	
+	$g_FoundTotalDirs = $g_TotalFolder;
+	$g_FoundTotalFiles = $g_TotalFiles;
+} 
+else
 // scan single file
 if (defined('SCAN_FILE')) {
    if (file_exists(SCAN_FILE) && is_file(SCAN_FILE) && is_readable(SCAN_FILE)) {
@@ -3352,7 +3384,7 @@ for ($tt = 0; $tt < $l_CmsDetectedNum; $tt++) {
     $g_CMS[] = $l_CmsListDetector->getCmsName($tt) . ' v' . $l_CmsListDetector->getCmsVersion($tt);
 }
 
-if (!(ONE_PASS || defined('SCAN_FILE') || isset($options['with-2check']))) {
+if (!(ONE_PASS || defined('SCAN_FILE') || (isset($options['with-2check']) && file_exists(DOUBLECHECK_FILE)) || isset($options['multi-thread']))) {
 QCR_GoScan(0);
 unlink(QUEUE_FILENAME);
 }
@@ -3959,4 +3991,82 @@ function Quarantine()
 
 	stdOut("\nCreate archive '" . realpath($archive) . "'.");
 	stdOut("This archive has no password!");
+}
+
+
+function saveResults($file) {
+	global $g_Iframer, $g_Redirect, $g_Doorway, $g_EmptyLink, $g_Structure, $g_HiddenFiles, $g_Base64, $g_NotRead,
+		   $g_HeuristicType, $g_HeuristicDetected, $g_TotalFolder, $g_TotalFiles, $g_WarningPHP, $g_AdwareList,
+		   $g_CriticalPHP, $g_Phishing, $g_CriticalJS, $g_CriticalJSFragment, $g_PHPCodeInside, $g_PHPCodeInsideFragment, 
+		   $g_WarningPHPFragment, $g_WarningPHPSig, $g_BigFiles, $g_RedirectPHPFragment, $g_EmptyLinkSrc, $g_CriticalPHPSig, $g_CriticalPHPFragment, 
+           $g_Base64Fragment, $g_UnixExec, $g_PhishingSigFragment, $g_PhishingFragment, $g_CriticalJSSig, $g_IframerFragment, $g_AdwareListFragment, $g_Vulnerable;
+
+	$list = array_keys(get_defined_vars());
+
+	$tmp_result = array();
+
+	foreach ($list as $var) {
+		$tmp_result[$var] =& $$var;
+	}
+
+	file_put_contents($file, serialize($tmp_result));
+}
+
+
+function loadResults($file) {
+	global $g_Iframer, $g_Redirect, $g_Doorway, $g_EmptyLink, $g_Structure, $g_HiddenFiles, $g_Base64, $g_NotRead,
+		   $g_HeuristicType, $g_HeuristicDetected, $g_TotalFolder, $g_TotalFiles, $g_WarningPHP, $g_AdwareList,
+		   $g_CriticalPHP, $g_Phishing, $g_CriticalJS, $g_CriticalJSFragment, $g_PHPCodeInside, $g_PHPCodeInsideFragment, 
+		   $g_WarningPHPFragment, $g_WarningPHPSig, $g_BigFiles, $g_RedirectPHPFragment, $g_EmptyLinkSrc, $g_CriticalPHPSig, $g_CriticalPHPFragment, 
+           $g_Base64Fragment, $g_UnixExec, $g_PhishingSigFragment, $g_PhishingFragment, $g_CriticalJSSig, $g_IframerFragment, $g_AdwareListFragment, $g_Vulnerable;
+
+	$data = unserialize(file_get_contents($file));
+
+	// list for replace
+	foreach (array('g_Structure', 'g_EmptyLinkSrc') as $var) {
+		is_array($$var) || $$var = array();
+		is_array($data[$var]) || $data[$var] = array();
+		$$var = array_replace_recursive($$var, $data[$var]);
+		unset($data[$var]);
+	}
+
+	// list for sum
+	foreach (array('g_TotalFiles', 'g_TotalFolder') as $var) {
+		$$var += $data[$var];
+		unset($data[$var]);
+	}
+
+	foreach (array_keys($data) as $var) {
+		is_array($$var) || $$var = array();
+		is_array($data[$var]) || $data[$var] = array();
+		$$var = array_merge($$var, $data[$var]);
+	}
+}
+
+
+function QCR_GoScan2($offset, $limit = -1, $s_file)
+{
+	global $g_HiddenFiles, $g_FoundTotalFiles, $BOOL_RESULT;
+	$offset = ($offset > 0) ? $offset - 1 : 0;
+	$g_FoundTotalFiles = ($limit > 0) ? $limit : 0;
+	try {
+		$s_file = new SplFileObject($s_file);
+		$s_file->setFlags(SplFileObject::READ_AHEAD | SplFileObject::SKIP_EMPTY | SplFileObject::DROP_NEW_LINE);
+		$s_file->seek($offset);
+		for ($i = 1, $l_Filename = $s_file->current(); !$s_file->eof() && ($limit == -1 || $limit--);  $l_Filename = $s_file->fgets()) {
+			$l_BaseName = basename($l_FileName);
+			if ((strpos($l_BaseName, '.') === 0) && ($l_BaseName != '.htaccess')) {
+				$g_HiddenFiles[] = $l_FileName;
+			}
+
+			is_dir($l_FN) && $g_TotalFolder++;
+			printProgress( $i++, $l_Filename);
+			$BOOL_RESULT = true; // display disable
+			QCR_ScanFile($l_Filename, $offset++);
+			$BOOL_RESULT = false; // display enable
+		}
+		
+		unset($s_file);
+	}
+	catch (Exception $e) { QCR_Debug( $e->getMessage() ); }
 }
