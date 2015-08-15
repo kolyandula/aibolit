@@ -3316,7 +3316,7 @@ if (isset($options['multi-thread']) AND !empty($options['multi-thread'])){
 			stdOut('Loading ' . $l_FN);
 			loadResults($l_FN);
 		}
-		foreach ($list as $line) {
+		foreach ($list as $l_FN) {
 			unlink($l_FN);
 		}
 	}
@@ -4054,9 +4054,9 @@ function QCR_GoScan2($offset, $limit = -1, $s_file)
 		$s_file->setFlags(SplFileObject::READ_AHEAD | SplFileObject::SKIP_EMPTY | SplFileObject::DROP_NEW_LINE);
 		$s_file->seek($offset);
 		for ($i = 1, $l_Filename = $s_file->current(); !$s_file->eof() && ($limit == -1 || $limit--);  $l_Filename = $s_file->fgets()) {
-			$l_BaseName = basename($l_FileName);
+			$l_BaseName = basename($l_Filename);
 			if ((strpos($l_BaseName, '.') === 0) && ($l_BaseName != '.htaccess')) {
-				$g_HiddenFiles[] = $l_FileName;
+				$g_HiddenFiles[] = $l_Filename;
 			}
 
 			is_dir($l_FN) && $g_TotalFolder++;
