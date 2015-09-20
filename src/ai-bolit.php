@@ -3162,7 +3162,7 @@ function CriticalPHP($l_FN, $l_Index, $l_Content, &$l_Pos, &$l_SigId)
     if (preg_match('#(' . $l_Item . ')#smiS', $l_Content, $l_Found, PREG_OFFSET_CAPTURE)) {
        if (!CheckException($l_Content, $l_Found)) {
            $l_Pos = $l_Found[0][1];
-           $l_SigId = myCheckSum($l_Item);
+           $l_SigId = getSigId($l_Found);
 
            if (DEBUG_MODE) {
               echo "CRIT 1: $l_FN matched [$l_Item] in $l_Pos\n";
@@ -4444,19 +4444,23 @@ function OptimizeSignatures()
 	$count = count($g_FlexDBShe);
 
 	for ($i = 0; $i < $count; $i++) {
-		if ($g_FlexDBShe[$i] == 'http://.+?/.+?\.php\?a=\d+&c=[a-zA-Z0-9_]+?&s=') $g_FlexDBShe[$i] = 'http://[^?\s]++(?<=\.php)\?a=\d+&c=[a-zA-Z0-9_]+?&s=';
-		if ($g_FlexDBShe[$i] == '[a-zA-Z0-9_]+?\(\s*[a-zA-Z0-9_]+?=\s*\)') $g_FlexDBShe[$i] = '\((?<=[a-zA-Z0-9_].)\s*[a-zA-Z0-9_]++=\s*\)';
-		if ($g_FlexDBShe[$i] == '([^\?\s])\({0,1}\.[\+\*]\){0,1}\2[a-z]*e') $g_FlexDBShe[$i] = '(?J)\.[+*](?<=(?<d>[^\?\s])\(..|(?<d>[^\?\s])..)\)?\g{d}[a-z]*e';
-		if ($g_FlexDBShe[$i] == '$[a-zA-Z0-9_]\{\d+\}\s*\.$[a-zA-Z0-9_]\{\d+\}\s*\.$[a-zA-Z0-9_]\{\d+\}\s*\.') $g_FlexDBShe[$i] = '\$[a-zA-Z0-9_]\{\d+\}\s*\.\$[a-zA-Z0-9_]\{\d+\}\s*\.\$[a-zA-Z0-9_]\{\d+\}\s*\.';
-
-		$g_FlexDBShe[$i] = preg_replace('~\[a-zA-Z0-9_\]\+\K\?~', '+', $g_FlexDBShe[$i]);
+		$g_FlexDBShe[$i] .= "(?<" . md5($g_FlexDBShe[$i]) . ">)";
+		$g_FlexDBShe[$i] = preg_replace('~\[a-zA-Z0-9_\]\+\K\?(?![a-zA-Z0-9_])~', '+', $g_FlexDBShe[$i]);
+		$g_FlexDBShe[$i] = preg_replace('~^((@|\\\\s|\[\'"\])(\{0,1\}\.?|\*))+~', '', $g_FlexDBShe[$i]);
 		$g_FlexDBShe[$i] = preg_replace('~^\\\\[d]\+&@~', '&@(?<=\d..)', $g_FlexDBShe[$i]);
-		$g_FlexDBShe[$i] = str_replace('\s*[\'"]{0,1}.+?[\'"]{0,1}\s*', '.+?', $g_FlexDBShe[$i]);
-		$g_FlexDBShe[$i] = str_replace('[\'"]{0,1}.+?[\'"]{0,1}', '.+?', $g_FlexDBShe[$i]);
-
-		$g_FlexDBShe[$i] = preg_replace('~^\[\'"\]\{0,1\}\.?|^@\*|^\\\\s\*~', '', $g_FlexDBShe[$i]);
-		$g_FlexDBShe[$i] = preg_replace('~^\[\'"\]\{0,1\}\.?|^@\*|^\\\\s\*~', '', $g_FlexDBShe[$i]);
 	}
+
+	$fix = array(
+		'http://.+?/.+?\.php\?a=\d+&c=[a-zA-Z0-9_]++&s=' => 'http://[^?\s]++(?<=\.php)\?a=\d+&c=[a-zA-Z0-9_]++&s=',
+		'[a-zA-Z0-9_]++\(\s*[a-zA-Z0-9_]++=\s*\)' => '\((?<=[a-zA-Z0-9_].)\s*[a-zA-Z0-9_]++=\s*\)',
+		'([^\?\s])\({0,1}\.[\+\*]\){0,1}\2[a-z]*e' => '(?J)\.[+*](?<=(?<d>[^\?\s])\(..|(?<d>[^\?\s])..)\)?\g{d}[a-z]*e',
+		'$[a-zA-Z0-9_]\{\d+\}\s*\.$[a-zA-Z0-9_]\{\d+\}\s*\.$[a-zA-Z0-9_]\{\d+\}\s*\.' => '\$[a-zA-Z0-9_]\{\d+\}\s*\.\$[a-zA-Z0-9_]\{\d+\}\s*\.\$[a-zA-Z0-9_]\{\d+\}\s*\.',
+		'\s*[\'"]{0,1}.+?[\'"]{0,1}\s*' => '.+?',
+		'[\'"]{0,1}.+?[\'"]{0,1}' => '.+?'
+	);
+
+	$g_FlexDBShe = str_replace(array_keys($fix), array_values($fix), $g_FlexDBShe);
+	$g_FlexDBShe = array_unique($g_FlexDBShe);
 
 	optSig($g_FlexDBShe);
 	optSig($g_JSVirSig);
@@ -4511,4 +4515,15 @@ function optSigCheck(&$sigs)
 	}
 	
 	return $result;
+}
+
+function getSigId($l_Found)
+{
+	foreach ($l_Found as $key => &$v) {
+		if (is_string($key) AND $v[1] != -1 AND strlen($key) == 32) {
+			return $key;
+		}
+	}
+	
+	return false;
 }
